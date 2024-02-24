@@ -4,27 +4,11 @@ import (
 	"fmt"
 	"github.com/codecrafters-io/docker-starter-go/app/docker"
 	"github.com/codecrafters-io/docker-starter-go/app/util"
-	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"syscall"
 )
 
-func copyExec(executable string, destinationDir string) {
-	reader, err := os.Open(executable)
-	util.ExitIfErr(err)
-	defer reader.Close()
-	execFile := destinationDir + executable
-	os.MkdirAll(filepath.Dir(execFile), 0777)
-	writer, err := os.Create(execFile)
-	util.ExitIfErr(err)
-	defer writer.Close()
-	io.Copy(writer, reader)
-	reader.Close()
-	writer.Close()
-	os.Chmod(execFile, 0777)
-}
 func chroot(dir string) {
 	err := syscall.Chroot(dir)
 	util.ExitIfErr(err)
