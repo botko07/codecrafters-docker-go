@@ -1,71 +1,59 @@
 package main
 
 import (
-	"errors"
 	"fmt"
+	"github.com/codecrafters-io/docker-starter-go/app/docker"
+	"github.com/codecrafters-io/docker-starter-go/app/util"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"syscall"
 )
 
+func copyExec(executable string, destinationDir string) {
+	reader, err := os.Open(executable)
+	util.ExitIfErr(err)
+	defer reader.Close()
+	execFile := destinationDir + executable
+	os.MkdirAll(filepath.Dir(execFile), 0777)
+	writer, err := os.Create(execFile)
+	util.ExitIfErr(err)
+	defer writer.Close()
+	io.Copy(writer, reader)
+	reader.Close()
+	writer.Close()
+	os.Chmod(execFile, 0777)
+}
+func chroot(dir string) {
+	err := syscall.Chroot(dir)
+	util.ExitIfErr(err)
+	os.Chdir("/")
+}
+func createNullDevice() {
+	os.Mkdir("/dev", 0755)
+	devNull, _ := os.Create("/dev/null")
+	devNull.Close()
+}
+
 // Usage: your_docker.sh run <image> <command> <arg1> <arg2> ...
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
+	image := os.Args[2]
 	command := os.Args[3]
 	args := os.Args[4:len(os.Args)]
-
-	// create tmp directory
-	tmp_dir, err := os.MkdirTemp("", "sandbox_*")
-	if err != nil {
-		fmt.Printf("Error creating tmp dir: %v\n", err)
-		os.Exit(1)
-	}
-	defer os.Remove(tmp_dir)
-	// chmod 0755 temp directory
-	err = os.Chmod(tmp_dir, 0755)
-	if err != nil {
-		fmt.Printf("Error chmod: %v\n", err)
-		os.Exit(1)
-	}
-	// mkDirAll filepath.join(tmp_dir, /usr/local/bin) 0755
-	err = os.MkdirAll(filepath.Join(tmp_dir, "/usr/local/bin"), 0755)
-	if err != nil {
-		fmt.Printf("Error mkdirall: %v\n", err)
-		os.Exit(1)
-	}
-	// os.Link(docker-explorer full path, filepathjoin(tempDir, "/usr/local/bin", "docker-explorer"))
-	err = os.Link("/usr/local/bin/docker-explorer", filepath.Join(tmp_dir, "/usr/local/bin", "docker-explorer"))
-	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		os.Exit(1)
-	}
-	//chroot temp_dir
-	err = syscall.Chroot(tmp_dir)
-	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		os.Exit(1)
-	}
-	//chdir into /
-	err = os.Chdir("/")
-	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		os.Exit(1)
-	}
-
+	containerName := fmt.Sprintf("%s-*", image)
+	tempDir, err := os.MkdirTemp("", containerName)
+	util.ExitIfErr(err)
+	docker.Pull(image, tempDir)
+	chroot(tempDir)
+	createNullDevice()
 	cmd := exec.Command(command, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID,
-	}
-	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err = cmd.Run()
-	if err != nil {
-		var exitError *exec.ExitError
-		if errors.As(err, &exitError) {
-			os.Exit(exitError.ExitCode())
-		}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags: syscall.CLONE_NEWPID,
 	}
-
+	cmd.Run()
+	exitCode := cmd.ProcessState.ExitCode()
+	os.Exit(exitCode)
 }
